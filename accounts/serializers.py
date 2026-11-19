@@ -41,9 +41,20 @@ class SignupSerializer(serializers.Serializer):
 
 
 class LoginSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token['role'] = user.role
+        token['email'] = user.email
+        token['name'] = user.get_full_name()
+        token['is_superuser'] = user.is_superuser
+        return token
+
     def validate(self, attrs):
         data = super().validate(attrs)
         if self.user.is_superuser:
             raise serializers.ValidationError('Administrators must sign in through the admin portal.')
         data['role'] = self.user.role
+        data['access_token'] = data['access']
+        data['refresh_token'] = data['refresh']
         return data

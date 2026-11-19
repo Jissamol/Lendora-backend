@@ -91,6 +91,8 @@ class SignupApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('access', response.data)
         self.assertIn('refresh', response.data)
+        self.assertIn('access_token', response.data)
+        self.assertIn('refresh_token', response.data)
         self.assertEqual(response.data['role'], get_user_model().Role.BORROWER)
 
     def test_superuser_uses_django_admin_instead_of_frontend_login(self):
@@ -113,3 +115,51 @@ class SignupApiTests(APITestCase):
         admin_response = self.client.get('/admin/')
 
         self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
+
+    def test_refresh_verify_me_and_logout_token_flow(self):
+        user = get_user_model().objects.create_user(
+            username='member@example.com',
+            email='member@example.com',
+            password='a-strong-password-123',
+            role=get_user_model().Role.BORROWER,
+        )
+
+        login_response = self.client.post(
+            '/api/auth/login/',
+            {'username': 'member@example.com', 'password': 'a-strong-password-123'},
+            format='json',
+        )
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+
+        access_token = login_response.data['access']
+        refresh_token = login_response.data['refresh']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {access_token}')
+
+        verify_response = self.client.post(
+            '/api/auth/verify/',
+            {'token': access_token},
+            format='json',
+        )
+        self.assertEqual(verify_response.status_code, status.HTTP_200_OK)
+
+        me_response = self.client.get('/api/auth/me/')
+        self.assertEqual(me_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(me_response.data['email'], user.email)
+
+        refresh_response = self.client.post(
+            '/api/auth/refresh/',
+            {'refresh': refresh_token},
+            format='json',
+        )
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', refresh_response.data)
+        self.assertIn('refresh', refresh_response.data)
+
+        rotated_refresh_token = refresh_response.data['refresh']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh_response.data["access"]}')
+        logout_response = self.client.post(
+            '/api/auth/logout/',
+            {'refresh': rotated_refresh_token},
+            format='json',
+        )
+        self.assertEqual(logout_response.status_code, status.HTTP_204_NO_CONTENT)
